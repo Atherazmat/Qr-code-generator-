@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QR Studio</title>
+<style>
+:root{--bg:#f6f6f4;--card:#fff;--text:#171717;--muted:#777;--line:#e7e7e5;--soft:#f0f0ed}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.wrap{max-width:1120px;margin:auto;padding:34px 18px 60px}
+header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:25px}
+h1{font-size:30px;letter-spacing:-1px;margin:0}.sub{color:var(--muted);margin-top:6px;font-size:14px}
+.badge{border:1px solid var(--line);background:#fff;padding:8px 11px;border-radius:999px;font-size:12px;color:#555}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 8px 30px rgba(0,0,0,.035)}
+.form{display:grid;grid-template-columns:1fr 1fr 150px;gap:12px}
+label{display:block;font-size:12px;font-weight:700;color:#555;margin:0 0 7px}
+input{height:46px;width:100%;border:1px solid #d8d8d5;border-radius:11px;background:#fff;padding:0 13px;font-size:16px;outline:none}
+input:focus{border-color:#111;box-shadow:0 0 0 3px rgba(0,0,0,.06)}
+button{height:46px;border:0;border-radius:11px;padding:0 17px;font-weight:700;font-size:14px;cursor:pointer;background:#151515;color:#fff}
+button:hover{background:#333}.secondary{background:var(--soft);color:#222}.secondary:hover{background:#e4e4e1}
+.actions{display:flex;gap:9px;margin-top:13px;flex-wrap:wrap}
+.status{font-size:13px;color:var(--muted);margin-top:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:14px;margin-top:22px}
+.card{background:#fff;border:1px solid var(--line);border-radius:15px;padding:15px;text-align:center;transition:.15s}
+.card:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(0,0,0,.06)}
+.card canvas{width:126px;height:126px;display:block;margin:auto}
+.num{font-weight:750;margin-top:10px;font-size:14px}
+.empty{margin-top:22px;border:1px dashed #d4d4d1;border-radius:15px;padding:55px 20px;text-align:center;color:#999}
+.small{font-size:11px;color:#aaa;margin-top:4px}
+@media(max-width:650px){header{align-items:flex-start;gap:12px}.badge{display:none}.form{grid-template-columns:1fr 1fr}.form button{grid-column:1/-1}.grid{grid-template-columns:repeat(2,1fr)}}
+@media print{body{background:#fff}.wrap{padding:0}header,.panel,.empty{display:none!important}.grid{margin:0;grid-template-columns:repeat(4,1fr);gap:7mm}.card{border:0;padding:3mm;break-inside:avoid}.card canvas{width:34mm;height:34mm}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div><h1>QR Studio</h1><div class="sub">Create numbered QR codes directly in your browser.</div></div>
+  <div class="badge">100% offline • No account</div>
+</header>
+
+<section class="panel">
+  <div class="form">
+    <div><label>STARTING NUMBER</label><input id="start" type="number" min="0" step="1" value="1"></div>
+    <div><label>ENDING NUMBER</label><input id="end" type="number" min="0" step="1" value="100"></div>
+    <button id="generate">Generate QR Codes</button>
+  </div>
+  <div class="actions">
+    <button class="secondary" id="print">Print / Save PDF</button>
+    <button class="secondary" id="clear">Clear</button>
+  </div>
+  <div class="status" id="status">Ready to generate.</div>
+</section>
+
+<div id="grid" class="grid"></div>
+<div id="empty" class="empty">Enter a range above to create your QR codes.</div>
+</div>
+
+<script>
+/* Compact QR encoder: byte-mode QR, versions 1–10, error correction L.
+   No external libraries, APIs, CDNs, or internet requests. */
+
+const EXP=new Array(512),LOG=new Array(256);let x=1;
+for(let i=0;i<255;i++){EXP[i]=x;LOG[x]=i;x<<=1;if(x&256)x^=0x11d}
+for(let i=255;i<512;i++)EXP[i]=EXP[i-255];
+function mul(a,b){return a&&b?EXP[LOG[a]+LOG[b]]:0}
+const EC={1:[7],2:[10],3:[15],4:[20],5:[26],6:[18],7:[20],8:[24],9:[30],10:[18]};
+const TOTAL={1:19,2:34,3:55,4:80,5:108,6:136,7:156,8:194,9:232,10:274};
+function poly(n){let g=[1];for(let i=0;i<n;i++){let r=Array(g.length+1).fill(0);for(let j=0;j<g.length;j++){r[j]^=g[j];r[j+1]^=mul(g[j],EXP[i])}g=r}return g}
+const G=Object.fromEntries(Object.values(EC).flat().map(n=>[n,poly(n)]));
+function ecc(data,n){let r=Array(n).fill(0),g=G[n];for(const b of data){let f=b^r[0];r.shift();r.push(0);for(let i=0;i<n;i++)r[i]^=mul(g[i+1],f)}return r}
+function bitsPush(a,v,n){for(let i=n-1;i>=0;i--)a.push((v>>i)&1)}
+function qrMatrix(text){
+ let bytes=[...new TextEncoder().encode(String(text))];
+ let v=1;while(v<=10&&bytes.length+2+EC[v][0]>TOTAL[v])v++;
+ if(v>10)throw Error("Number too large");
+ let ec=EC[v][0], cap=TOTAL[v]-ec, b=[];bitsPush(b,4,4);bitsPush(b,bytes.length,8);
+ bytes.forEach(q=>bitsPush(b,q,8));while(b.length<cap*8)b.push(0);for(let i=0;i<Math.min(4,cap*8-b.length);i++)b.push(0);
+ while(b.length%8)b.push(0);let data=[];for(let i=0;i<b.length;i+=8)data.push(b.slice(i,i+8).reduce((a,z)=>(a<<1)|z,0));
+ let pad=0;while(data.length<cap){data.push(pad++%2?0x11:0xec)}
+ let code=data.concat(ecc(data,ec)),size=17+4*v;
+ function base(){let m=Array.from({length:size},()=>Array(size).fill(null));function finder(r,c){for(let y=-1;y<8;y++)for(let x=-1;x<8;x++){let yy=r+y,xx=c+x;if(yy>=0&&yy<size&&xx>=0&&xx<size)m[yy][xx]=(x>=0&&x<=6&&y>=0&&y<=6&&(x==0||x==6||y==0||y==6||x>=2&&x<=4&&y>=2&&y<=4))?1:0}}finder(0,0);finder(size-7,0);finder(0,size-7);
+ let align={2:[6,18],3:[6,22],4:[6,26],5:[6,30],6:[6,34],7:[6,22,38],8:[6,24,42],9:[6,26,46],10:[6,28,50]}[v]||[];
+ for(let r of align)for(let c of align)if(m[r][c]===null)for(let y=-2;y<=2;y++)for(let x=-2;x<=2;x++)m[r+y][c+x]=(Math.max(Math.abs(x),Math.abs(y))!=1);
+ for(let i=8;i<size-8;i++)if(m[i][6]===null)m[i][6]=i%2==0;if(m[6][i]===null)m[6][i]=i%2==0;
+ return m}
+ function place(m,mask){let k=0,up=true;for(let c=size-1;c>0;c-=2){if(c==6)c--;for(let q=0;q<size;q++){let r=up?size-1-q:q;for(let j=0;j<2;j++){let cc=c-j;if(m[r][cc]===null){let z=k<code.length*8?((code[k>>3]>>(7-(k&7)))&1):0;k++;let z2=mask(z,r,cc);m[r][cc]=z2}}}up=!up}return m}
+ let best=null,score=1e9;
+ for(let mask=0;mask<8;mask++){let m=place(base(),(z,r,c)=>{let p=[(r+c)%2,r%2,c%3,(r+c)%3,((r>>1)+(c>>2))%2,(r*c)%2,((r*c)%2+(r*c)%3)%2,((r*c)%3+(r+c)%2)%2][mask];return z^(p==0)});let s=penalty(m);if(s<score){score=s;best=m}}
+ return best
+}
+function penalty(m){let n=m.length,s=0;for(let r=0;r<n;r++){for(let c=0;c<n;c++){let same=0,v=m[r][c];for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++)if(!(x==0&&y==0)&&m[r+y]?.[c+x]===v)same++;if(same>5)s+=3+same-5}}for(let r=0;r<n;r++)for(let c=0;c<n;c++){let v=m[r][c];if(c+6<n&&m[r][c+1]===v&&m[r][c+2]!==v&&m[r][c+3]===v&&m[r][c+4]===v&&m[r][c+5]===v&&m[r][c+6]===v)s+=40}return s}
+function draw(canvas,m){let ctx=canvas.getContext("2d"),n=m.length,scale=Math.floor(300/n),off=Math.floor((300-n*scale)/2);ctx.fillStyle="#fff";ctx.fillRect(0,0,300,300);ctx.fillStyle="#000";for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(m[r][c])ctx.fillRect(off+c*scale,off+r*scale,scale,scale)}
+function generate(){
+ let a=Number(start.value),b=Number(end.value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<0||b<a){status.textContent="Enter a valid starting and ending number.";return}
+ let total=b-a+1;if(total>5000){status.textContent="Maximum 5,000 QR codes per batch.";return}
+ grid.innerHTML="";empty.style.display="none";let frag=document.createDocumentFragment();
+ for(let n=a;n<=b;n++){let card=document.createElement("div");card.className="card";let c=document.createElement("canvas");c.width=c.height=300;draw(c,qrMatrix(n));let t=document.createElement("div");t.className="num";t.textContent=n;card.append(c,t);frag.append(card)}
+ grid.append(frag);status.textContent=`${total.toLocaleString()} QR code${total===1?"":"s"} generated locally.`
+}
+generateBtn.onclick=generate;print.onclick=()=>grid.children.length?print():status.textContent="Generate QR codes first.";clear.onclick=()=>{grid.innerHTML="";empty.style.display="block";status.textContent="Cleared."}
+</script>
+</body>
+</html>
